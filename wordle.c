@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 #include <ctype.h>
+#include <signal.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -72,6 +73,11 @@ static void reset_attributes(void) {
 }
 
 // ====================== Game Types & Logic ======================
+
+#define WORD_LEN 5
+#define MAX_GUESSES 6
+#define ALPHABET 26
+
 typedef enum {
   LETTER_DEFAULT,
   LETTER_UNUSED,
@@ -87,25 +93,24 @@ typedef struct {
 typedef struct {
   int w, h;
   int cursor_y;
-  Letter letters[26];
-  Letter guesses[6][5];
+  Letter letters[ALPHABET];
+  Letter guesses[MAX_GUESSES][WORD_LEN];
   int guess_count;
-  char wordle[6];
-  int chr_max_total[26];
+  char wordle[WORD_LEN + 1];
+  int chr_max_total[ALPHABET];
   char last_error[64];
 } GameState;
 
-static int char_to_index(char c) { return tolower(c) - 'a'; }
+static int char_to_index(char c) { return tolower((unsigned char)c) - 'a'; }
 
 static int compare_str(const void *a, const void *b) {
   return strcmp(*(const char **)a, *(const char **)b);
 }
 
 static bool guess_valid(const char *guess) {
-  char lower[6];
-  strncpy(lower, guess, 5);
-  lower[5] = '\0';
-  for (int i = 0; i < 5; i++)
+  char lower[WORD_LEN + 1];
+  memcpy(lower, guess, WORD_LEN + 1);
+  for (int i = 0; i < WORD_LEN; i++)
     lower[i] = tolower((unsigned char)lower[i]);
 
   const char *key = lower;
@@ -117,9 +122,6 @@ static bool guess_valid(const char *guess) {
   return false;
 }
 
-// ... (keep check_letter, process_guess, all drawing functions,
-// get_and_process_guess, run_game, new_game exactly the same as before)
-
 static Letter check_letter(GameState *gs, char c, int pos) {
   Letter l = {.chr = c, .state = LETTER_UNUSED};
   if (gs->wordle[pos] == c)
@@ -130,12 +132,12 @@ static Letter check_letter(GameState *gs, char c, int pos) {
 }
 
 static bool process_guess(GameState *gs, const char *guess_upper) {
-  Letter guess_letters[5];
+  Letter guess_letters[WORD_LEN];
   int correct_total = 0;
-  int chr_correct[26] = {0};
-  int chr_possible[26] = {0};
+  int chr_correct[ALPHABET] = {0};
+  int chr_possible[ALPHABET] = {0};
 
-  for (int i = 0; i < 5; i++) {
+  for (int i = 0; i < WORD_LEN; i++) {
     char c = guess_upper[i];
     guess_letters[i] = check_letter(gs, c, i);
     int idx = char_to_index(c);
@@ -148,9 +150,11 @@ static bool process_guess(GameState *gs, const char *guess_upper) {
     }
   }
 
-  for (int i = 4; i >= 0; i--) {
+  for (int i = WORD_LEN - 1; i >= 0; i--) {
     if (guess_letters[i].state == LETTER_POSSIBLE) {
       int idx = char_to_index(guess_letters[i].chr);
+      // Wordle rule: mark as unused if we've run out of instances
+      // of this letter after accounting for correct positions
       if (chr_possible[idx] > gs->chr_max_total[idx] - chr_correct[idx]) {
         chr_possible[idx]--;
         guess_letters[i].state = LETTER_UNUSED;
@@ -158,7 +162,7 @@ static bool process_guess(GameState *gs, const char *guess_upper) {
     }
   }
 
-  for (int i = 0; i < 5; i++) {
+  for (int i = 0; i < WORD_LEN; i++) {
     int idx = char_to_index(guess_letters[i].chr);
     if (gs->letters[idx].state != LETTER_CORRECT) {
       gs->letters[idx].state = guess_letters[i].state;
@@ -167,11 +171,10 @@ static bool process_guess(GameState *gs, const char *guess_upper) {
 
   memcpy(gs->guesses[gs->guess_count], guess_letters, sizeof(guess_letters));
   gs->guess_count++;
-  return correct_total == 5;
+  return correct_total == WORD_LEN;
 }
 
-// (Keep all the drawing functions: write_colored_letter, draw_keyboard,
-// draw_guesses, etc. — same as last version)
+// ====================== Drawing functions =======================
 
 static void write_colored_letter(char c, LetterState state) {
   const char *color = FG_DEFAULT;
@@ -207,11 +210,11 @@ static void draw_keyboard(GameState *gs) {
 }
 
 static void draw_guesses(GameState *gs) {
-  int x = (gs->w / 2) - 6;
+  int x = (gs->w / 2) - WORD_LEN + 1;
   for (int i = 0; i < gs->guess_count; i++) {
     move_cursor(x, gs->cursor_y);
     printf("%d. ", i + 1);
-    for (int j = 0; j < 5; j++) {
+    for (int j = 0; j < WORD_LEN; j++) {
       write_colored_letter(gs->guesses[i][j].chr, gs->guesses[i][j].state);
     }
     gs->cursor_y++;
@@ -270,7 +273,7 @@ static bool get_and_process_guess(GameState *gs) {
   write_centered(gs, FG_DEFAULT, "Enter a guess: ");
   fflush(stdout);
 
-  char guess[6] = {0};
+  char guess[WORD_LEN + 1] = {0};
   int len = 0;
 
   while (true) {
@@ -279,11 +282,11 @@ static bool get_and_process_guess(GameState *gs) {
       exit(0);
 
     if (ch == '\r' || ch == '\n') {
-      if (len == 5 && guess_valid(guess)) {
+      if (len == WORD_LEN && guess_valid(guess)) {
         return process_guess(gs, guess);
       } else {
-        strncpy(gs->last_error, "Invalid word or wrong length",
-                sizeof(gs->last_error) - 1);
+        snprintf(gs->last_error, sizeof(gs->last_error), "%s",
+                 "Invalid word or wrong length");
         draw_prompt(gs);
         write_centered(gs, FG_DEFAULT, "Enter a guess: ");
         len = 0;
@@ -293,17 +296,19 @@ static bool get_and_process_guess(GameState *gs) {
       len--;
       printf("\b \b");
       fflush(stdout);
-    } else if (isalpha(ch) && len < 5) {
-      guess[len++] = toupper(ch);
-      printf("%c", toupper(ch));
+    } else if (isalpha((unsigned char)ch) && len < WORD_LEN) {
+      guess[len++] = toupper((unsigned char)ch);
+      printf("%c", toupper((unsigned char)ch));
       fflush(stdout);
     }
   }
 }
 
+// ====================== Main Loop =======================
+
 static bool run_game(GameState *gs) {
   bool won = false;
-  while (!won && gs->guess_count < 6) {
+  while (!won && gs->guess_count < MAX_GUESSES) {
     won = get_and_process_guess(gs);
   }
   if (won)
@@ -322,33 +327,32 @@ static void new_game(GameState *gs) {
   get_terminal_size(&gs->w, &gs->h);
 
   const char *qwerty = "QWERTYUIOPASDFGHJKLZXCVBNM";
-  for (int i = 0; i < 26; i++) {
+  for (int i = 0; i < ALPHABET; i++) {
     gs->letters[i].chr = qwerty[i];
     gs->letters[i].state = LETTER_DEFAULT;
   }
 
-  srand(time(NULL));
   int idx = rand() % word_list_len;
-  strncpy(gs->wordle, word_list[idx], 5);
-  gs->wordle[5] = '\0';
+  memcpy(gs->wordle, word_list[idx], WORD_LEN + 1);
   for (int i = 0; gs->wordle[i]; i++)
-    gs->wordle[i] = toupper(gs->wordle[i]);
+    gs->wordle[i] = toupper((unsigned char)gs->wordle[i]);
 
-  for (int i = 0; gs->wordle[i]; i++) {
-    int c = char_to_index(gs->wordle[i]);
-    if (gs->chr_max_total[c] == 0) {
-      for (int j = 0; gs->wordle[j]; j++)
-        if (char_to_index(gs->wordle[j]) == c)
-          gs->chr_max_total[c]++;
-    }
-  }
+  for (int i = 0; i < WORD_LEN; i++)
+    gs->chr_max_total[char_to_index(gs->wordle[i])]++;
+}
+
+static void handle_sigint(int sig) {
+  (void)sig;
+  exit(0);
 }
 
 int main(void) {
-  enable_raw_mode();
+  signal(SIGINT, handle_sigint);
   atexit(erase_screen);
   atexit(reset_attributes);
+  srand(time(NULL));
 
+  enable_raw_mode();
   bool play_again = true;
   while (play_again) {
     GameState game;
