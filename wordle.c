@@ -122,49 +122,42 @@ static bool guess_valid(const char *guess) {
   return false;
 }
 
-static Letter check_letter(GameState *gs, char c, int pos) {
-  Letter l = {.chr = c, .state = LETTER_UNUSED};
-  if (gs->wordle[pos] == c)
-    l.state = LETTER_CORRECT;
-  else if (strchr(gs->wordle, (unsigned char)c))
-    l.state = LETTER_POSSIBLE;
-  return l;
-}
-
 static bool process_guess(GameState *gs, const char *guess_upper) {
   Letter guess_letters[WORD_LEN];
+  int remaining[ALPHABET] = {0};
   int correct_total = 0;
-  int chr_correct[ALPHABET] = {0};
-  int chr_possible[ALPHABET] = {0};
 
   for (int i = 0; i < WORD_LEN; i++) {
-    char c = guess_upper[i];
-    guess_letters[i] = check_letter(gs, c, i);
-    int idx = char_to_index(c);
+    int idx = char_to_index(gs->wordle[i]);
+    remaining[idx]++;
+  }
 
-    if (guess_letters[i].state == LETTER_CORRECT) {
+  for (int i = 0; i < WORD_LEN; i++) {
+    guess_letters[i].chr = guess_upper[i];
+    guess_letters[i].state = LETTER_UNUSED;
+
+    if (guess_upper[i] == gs->wordle[i]) {
+      guess_letters[i].state = LETTER_CORRECT;
       correct_total++;
-      chr_correct[idx]++;
-    } else if (guess_letters[i].state == LETTER_POSSIBLE) {
-      chr_possible[idx]++;
+      remaining[char_to_index(guess_upper[i])]--;
     }
   }
 
-  for (int i = WORD_LEN - 1; i >= 0; i--) {
-    if (guess_letters[i].state == LETTER_POSSIBLE) {
-      int idx = char_to_index(guess_letters[i].chr);
-      // Wordle rule: mark as unused if we've run out of instances
-      // of this letter after accounting for correct positions
-      if (chr_possible[idx] > gs->chr_max_total[idx] - chr_correct[idx]) {
-        chr_possible[idx]--;
-        guess_letters[i].state = LETTER_UNUSED;
-      }
+  for (int i = 0; i < WORD_LEN; i++) {
+    if (guess_letters[i].state == LETTER_CORRECT)
+      continue;
+
+    int idx = char_to_index(guess_letters[i].chr);
+    if (remaining[idx] > 0) {
+      guess_letters[i].state = LETTER_POSSIBLE;
+      remaining[idx]--;
     }
   }
 
   for (int i = 0; i < WORD_LEN; i++) {
     int idx = char_to_index(guess_letters[i].chr);
-    if (gs->letters[idx].state != LETTER_CORRECT) {
+    if (gs->letters[idx].state != LETTER_CORRECT &&
+        guess_letters[i].state > gs->letters[idx].state) {
       gs->letters[idx].state = guess_letters[i].state;
     }
   }
@@ -222,7 +215,10 @@ static void draw_guesses(GameState *gs) {
 }
 
 static void write_centered(GameState *gs, const char *color, const char *text) {
-  int x = (gs->w / 2) - (strlen(text) / 2);
+  int x = (gs->w - (int)strlen(text)) / 2;
+  // Prevent negative values on tiny terminals
+  if (x < 0)
+    x = 0;
   move_cursor(x, gs->cursor_y);
   printf("%s%s%s", color, text, ANSI_RESET);
   fflush(stdout);
@@ -326,10 +322,21 @@ static void new_game(GameState *gs) {
   memset(gs, 0, sizeof(*gs));
   get_terminal_size(&gs->w, &gs->h);
 
+  if (gs->w < 40 || gs->h < 20) {
+    fprintf(stderr, "Terminal too small. Need at least 40x20\n");
+    exit(1);
+  }
+
   const char *qwerty = "QWERTYUIOPASDFGHJKLZXCVBNM";
   for (int i = 0; i < ALPHABET; i++) {
     gs->letters[i].chr = qwerty[i];
     gs->letters[i].state = LETTER_DEFAULT;
+  }
+
+  if (word_list_len == 0) {
+    fprintf(stderr,
+            "Error: word_list is empty. Check the generated headers.\n");
+    exit(1);
   }
 
   int idx = rand() % word_list_len;
