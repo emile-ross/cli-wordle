@@ -35,7 +35,7 @@ static void enable_raw_mode(void) {
   atexit(disable_raw_mode);
 
   struct termios raw = orig_termios;
-  raw.c_lflag &= ~(ECHO | ICANON);
+  raw.c_lflag &= (tcflag_t)~(ECHO | ICANON);
   raw.c_cc[VMIN] = 1;
   raw.c_cc[VTIME] = 0;
   tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
@@ -117,12 +117,12 @@ static bool guess_valid(const char *guess) {
   char lower[WORD_LEN + 1];
   memcpy(lower, guess, WORD_LEN + 1);
   for (int i = 0; i < WORD_LEN; i++)
-    lower[i] = tolower((unsigned char)lower[i]);
+    lower[i] = (char)tolower((unsigned char)lower[i]);
 
   const char *key = lower;
-  if (bsearch(&key, word_list, word_list_len, sizeof(char *), compare_str))
+  if (bsearch(&key, word_list, (size_t)word_list_len, sizeof(char *), compare_str))
     return true;
-  if (bsearch(&key, valid_word_list, valid_word_list_len, sizeof(char *),
+  if (bsearch(&key, valid_word_list, (size_t)valid_word_list_len, sizeof(char *),
               compare_str))
     return true;
   return false;
@@ -305,8 +305,8 @@ static bool get_and_process_guess(GameState *gs) {
       printf("\b \b");
       fflush(stdout);
     } else if (isalpha((unsigned char)ch) && len < WORD_LEN) {
-      guess[len++] = toupper((unsigned char)ch);
-      printf("%c", toupper((unsigned char)ch));
+      guess[len++] = (char)toupper((unsigned char)ch);
+      printf("%c", (char)toupper((unsigned char)ch));
       fflush(stdout);
     }
   }
@@ -345,7 +345,7 @@ static void new_game(GameState *gs) {
     gs->letters[i].state = LETTER_DEFAULT;
   }
 
-  if (word_list_len == 0) {
+  if (word_list_len <= 0) {
     fprintf(stderr,
             "Error: word_list is empty. Check the generated headers.\n");
     exit(1);
@@ -354,7 +354,7 @@ static void new_game(GameState *gs) {
   int idx = rand() % word_list_len;
   memcpy(gs->wordle, word_list[idx], WORD_LEN + 1);
   for (int i = 0; gs->wordle[i]; i++)
-    gs->wordle[i] = toupper((unsigned char)gs->wordle[i]);
+    gs->wordle[i] = (char)toupper((unsigned char)gs->wordle[i]);
 }
 
 static void handle_sigint(int sig) {

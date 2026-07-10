@@ -15,10 +15,10 @@ typedef struct {
 static void parse_possible(const char *input, PossibleLetter *possibles,
                            int *count) {
   *count = 0;
-  int len = strlen(input);
+  size_t len = strlen(input);
 
-  for (int i = 0; i + 1 < len && *count < 10; i += 2) {
-    char c = tolower((unsigned char)input[i]);
+  for (size_t i = 0; i + 1 < len && *count < 10; i += 2) {
+    char c = (char)tolower((unsigned char)input[i]);
     if (!isalpha(c))
       continue;
 
@@ -93,7 +93,7 @@ static void find_candidates(const char correct[5],
   }
 
   // Sort and print
-  qsort(candidates, candidate_count, sizeof(char *), compare_strings);
+  qsort(candidates, (size_t)candidate_count, sizeof(char *), compare_strings);
 
   printf("Possible candidates (%d):\n", candidate_count);
   for (int i = 0; i < candidate_count; i++) {
@@ -105,7 +105,7 @@ static void find_candidates(const char correct[5],
   putchar('\n');
 }
 
-static void prompt_and_read(const char *prompt, char *buffer, size_t size) {
+static void prompt_and_read(const char *prompt, char *buffer, int size) {
   printf("%s", prompt);
   fflush(stdout);
 
@@ -132,7 +132,7 @@ int main(void) {
   // Convert correct pattern to lowercase
   for (int i = 0; i < 5; i++) {
     if (correct[i] != '_') {
-      correct[i] = tolower((unsigned char)correct[i]);
+      correct[i] = (char)tolower((unsigned char)correct[i]);
     }
   }
 
